@@ -244,7 +244,7 @@ func NewStreamCipher(method, password string) (c *StreamCipher, err error) {
 func (c *StreamCipher) initEncrypt() (iv []byte, err error) {
 	if c.iv == nil {
 		iv = make([]byte, c.info.ivLen)
-		rand.Read(iv)
+		_,_ = rand.Read(iv)
 		c.iv = iv
 	} else {
 		iv = c.iv

@@ -1,43 +1,40 @@
 package shadowsocksr
 
 import (
-	"bytes"
-	"fmt"
 	"net"
 	"sync"
-
+	"time"
 	"github.com/zu1k/gossr/obfs"
 	"github.com/zu1k/gossr/protocol"
 	"github.com/zu1k/gossr/tools/leakybuf"
 )
+
+
 
 // SSTCPConn the struct that override the net.Conn methods
 type SSTCPConn struct {
 	net.Conn
 	sync.RWMutex
 	*StreamCipher
-	IObfs          obfs.IObfs
-	IProtocol      protocol.IProtocol
-	readBuf        []byte
-	readDecodeBuf  *bytes.Buffer
-	readIObfsBuf   *bytes.Buffer
-	readEncryptBuf *bytes.Buffer
-	readIndex      uint64
-	readUserBuf    *bytes.Buffer
-	writeBuf       []byte
-	lastReadError  error
+	IObfs         obfs.IObfs
+	IProtocol     protocol.IProtocol
+	IFilter       Filter
+	leftToRead    []byte
+	leftToWrite   []byte
+	ltwMutex      sync.Mutex
+	readBuf       []byte
+	writeBuf      []byte
+	lastReadError error
+	coldStart     bool
 }
 
 func NewSSTCPConn(c net.Conn, cipher *StreamCipher) *SSTCPConn {
 	return &SSTCPConn{
-		Conn:           c,
-		StreamCipher:   cipher,
-		readBuf:        leakybuf.GlobalLeakyBuf.Get(),
-		readDecodeBuf:  bytes.NewBuffer(nil),
-		readIObfsBuf:   bytes.NewBuffer(nil),
-		readUserBuf:    bytes.NewBuffer(nil),
-		readEncryptBuf: bytes.NewBuffer(nil),
-		writeBuf:       leakybuf.GlobalLeakyBuf.Get(),
+		Conn:         c,
+		StreamCipher: cipher,
+		readBuf:      leakybuf.GlobalLeakyBuf.Get(),
+		writeBuf:     leakybuf.GlobalLeakyBuf.Get(),
+		coldStart:    true,
 	}
 }
 
@@ -63,6 +60,7 @@ func (c *SSTCPConn) initEncryptor(b []byte) (iv []byte, err error) {
 	if c.enc == nil {
 		iv, err = c.initEncrypt()
 		if err != nil {
+			//common.Error("generating IV failed", err)
 			return nil, err
 		}
 
@@ -82,123 +80,131 @@ func (c *SSTCPConn) initEncryptor(b []byte) (iv []byte, err error) {
 	return
 }
 
-func (c *SSTCPConn) Read(b []byte) (n int, err error) {
-	for {
-		n, err = c.doRead(b)
-		if b == nil || n != 0 || err != nil {
-			return n, err
-		}
+func (c *SSTCPConn) doRead() (err error) {
+	if c.lastReadError != nil {
+		return c.lastReadError
 	}
-}
-
-func (c *SSTCPConn) doRead(b []byte) (n int, err error) {
-	//先吐出已经解密后数据
-	if c.readUserBuf.Len() > 0 {
-		return c.readUserBuf.Read(b)
-	}
-	//未读取够长度继续读取并解码
-	decodelength := c.readDecodeBuf.Len()
-	if (decodelength == 0 || c.readEncryptBuf.Len() > 0 || (c.readIndex != 0 && c.readIndex > uint64(decodelength))) && c.lastReadError == nil {
-		c.readIndex = 0
-		n, c.lastReadError = c.Conn.Read(c.readBuf)
-		//写入decode 缓存
-		c.readDecodeBuf.Write(c.readBuf[0:n])
-	}
-	//无缓冲数据返回错误
-	if c.lastReadError != nil && (decodelength == 0 || uint64(decodelength) < c.readIndex) {
-		return 0, c.lastReadError
-	}
-	decodelength = c.readDecodeBuf.Len()
-	decodebytes := c.readDecodeBuf.Bytes()
-	c.readDecodeBuf.Reset()
-
-	for {
-
-		decodedData, length, err := c.IObfs.Decode(decodebytes)
-		if length == 0 && err != nil {
-			return 0, err
-		}
-
-		//do send back
-		if length == 1 {
-			c.Write(make([]byte, 0))
-			return 0, nil
-		}
-
-		//数据不够长度
+	c.Lock()
+	defer c.Unlock()
+	inData := c.readBuf
+	var n int
+	n, c.lastReadError = c.Conn.Read(inData)
+	if n > 0 {
+		var decodedData []byte
+		var needSendBack bool
+		decodedData, needSendBack, err = c.IObfs.Decode(inData[:n])
 		if err != nil {
-			if uint64(decodelength) >= length {
-				return 0, fmt.Errorf("data length: %d,decode data length: %d unknown panic", decodelength, length)
+			return
+		}
+
+		if needSendBack {
+			//common.Debug("do send back")
+			//buf := c.IObfs.Encode(make([]byte, 0))
+			//c.Conn.Write(buf)
+			c.Write(nil)
+			return nil
+		}
+
+		if decodedDataLen := len(decodedData); decodedDataLen > 0 {
+			if c.dec == nil {
+				iv := decodedData[0:c.info.ivLen]
+				if err = c.initDecrypt(iv); err != nil {
+					//common.Error("init decrypt failed", err)
+					return err
+				}
+
+				if len(c.iv) == 0 {
+					c.iv = iv
+				}
+				decodedDataLen -= c.info.ivLen
+				decodedData = decodedData[c.info.ivLen:]
 			}
-			c.readIndex = length
-			c.readDecodeBuf.Write(decodebytes)
-			if c.readIObfsBuf.Len() == 0 {
-				return 0, nil
+			//c.decrypt(b[0:n], inData[0:n])
+			buf := make([]byte, decodedDataLen)
+			c.decrypt(buf, decodedData)
+
+			var postDecryptedData []byte
+			postDecryptedData, err = c.IProtocol.PostDecrypt(buf)
+			if err != nil {
+				return
 			}
-			break
-		}
-
-		if length >= 1 {
-			//读出数据 但是有多余的数据 返回已经读取数值
-			c.readIObfsBuf.Write(decodedData)
-			decodebytes = decodebytes[length:]
-			decodelength = len(decodebytes)
-			continue
-		}
-
-		//完全读取数据 --	length == 0
-		c.readIObfsBuf.Write(decodedData)
-		break
-	}
-
-	decodedData := c.readIObfsBuf.Bytes()
-	decodelength = c.readIObfsBuf.Len()
-	c.readIObfsBuf.Reset()
-
-	if decodedDataLen := len(decodedData); decodedDataLen >= c.info.ivLen {
-		if c.dec == nil {
-			iv := decodedData[0:c.info.ivLen]
-			if err = c.initDecrypt(iv); err != nil {
-				return 0, err
+			postDecryptedDataLen := len(postDecryptedData)
+			if postDecryptedDataLen > 0 {
+				b := make([]byte, len(c.leftToRead)+postDecryptedDataLen)
+				copy(b, c.leftToRead)
+				copy(b[len(c.leftToRead):], postDecryptedData)
+				c.leftToRead = b
+				return
 			}
-
-			if len(c.iv) == 0 {
-				c.iv = iv
-			}
-			decodelength -= c.info.ivLen
-			if decodelength <= 0 {
-				return 0, nil
-			}
-			decodedData = decodedData[c.info.ivLen:]
 		}
-		buf := make([]byte, decodelength)
-		c.decrypt(buf, decodedData)
-
-		c.readEncryptBuf.Write(buf)
-		encryptbuf := c.readEncryptBuf.Bytes()
-		c.readEncryptBuf.Reset()
-		postDecryptedData, length, err := c.IProtocol.PostDecrypt(encryptbuf)
-		if err != nil {
-			return 0, err
-		}
-		if length == 0 {
-			c.readEncryptBuf.Write(encryptbuf)
-			return 0, nil
-		}
-
-		if length > 0 {
-			c.readEncryptBuf.Write(encryptbuf[length:])
-		}
-		postDecryptedlength := len(postDecryptedData)
-		blength := len(b)
-		copy(b, postDecryptedData)
-		if blength > postDecryptedlength {
-			return postDecryptedlength, nil
-		}
-		c.readUserBuf.Write(postDecryptedData[len(b):])
-		return blength, nil
 	}
 	return
+}
+
+func (c *SSTCPConn) Read(b []byte) (n int, err error) {
+	c.RLock()
+	leftLength := len(c.leftToRead)
+	c.RUnlock()
+	if leftLength == 0 {
+		if err = c.doRead(); err != nil {
+			return 0, err
+		}
+	}
+	if c.lastReadError != nil {
+		defer func() {
+			go c.doRead()
+		}()
+	}
+
+	if leftLength := len(c.leftToRead); leftLength > 0 {
+		maxLength := len(b)
+		if leftLength > maxLength {
+			c.Lock()
+			copy(b, c.leftToRead[:maxLength])
+			c.leftToRead = c.leftToRead[maxLength:]
+			c.Unlock()
+			return maxLength, nil
+		}
+
+		c.Lock()
+		copy(b, c.leftToRead)
+		c.leftToRead = nil
+		c.Unlock()
+		return leftLength, c.lastReadError
+	}
+	return 0, c.lastReadError
+}
+
+// Avoid server filtering (SSPanel)
+// Cuts off data when a pattern is found.
+// Send it out after a reply is received or a duration is passed
+func (c *SSTCPConn) avoidServerFilter(b []byte) (outData []byte) {
+	if c.coldStart && len(b) > 0 {
+		c.ltwMutex.Lock()
+		defer c.ltwMutex.Unlock()
+		if c.leftToWrite == nil {
+			if loc := c.IFilter.FindIndex(b); loc != nil {
+				c.leftToWrite = b[loc[0]:]
+				b = b[:loc[0]]
+				// timeout handler
+				go func() {
+					time.Sleep(time.Duration(20) * time.Millisecond)
+					c.coldStart = false
+					if len(c.leftToWrite) > 0 {
+						c.Write(nil)
+					}
+				}()
+			}
+		} else if len(b) > 0 {
+			c.leftToWrite = append(c.leftToWrite, b...)
+		}
+	} else if len(c.leftToWrite) > 0 {
+		c.ltwMutex.Lock()
+		defer c.ltwMutex.Unlock()
+		b = append(c.leftToWrite, b...)
+		c.leftToWrite = nil
+	}
+	return b
 }
 
 func (c *SSTCPConn) preWrite(b []byte) (outData []byte, err error) {
@@ -207,7 +213,13 @@ func (c *SSTCPConn) preWrite(b []byte) (outData []byte, err error) {
 		return
 	}
 
+	// Avoid server filtering (SSPanel)
+	c.avoidServerFilter(b)
+
 	var preEncryptedData []byte
+	if b == nil {
+		b = make([]byte, 0)
+	}
 	preEncryptedData, err = c.IProtocol.PreEncrypt(b)
 	if err != nil {
 		return
@@ -244,9 +256,11 @@ func (c *SSTCPConn) Write(b []byte) (n int, err error) {
 	outData, err := c.preWrite(b)
 	if err == nil {
 		n, err = c.Conn.Write(outData)
-		if err != nil {
-			return n, err
-		}
 	}
-	return len(b), nil
+	// For fastauth
+	if c.coldStart && b != nil {
+		nn, err := c.Write(nil)
+		return n+nn, err
+	}
+	return
 }

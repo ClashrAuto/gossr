@@ -70,10 +70,19 @@ func (r *randomHead) Encode(data []byte) (encodedData []byte, err error) {
 	return
 }
 
-func (r *randomHead) Decode(data []byte) ([]byte, uint64, error) {
+//func (r *randomHead) Decode(data []byte) ([]byte, uint64, error) {
+//	if r.rawTransReceived {
+//		return data, 0, nil
+//	}
+//	r.rawTransReceived = true
+//	return data, 0, nil
+//}
+
+
+func (r *randomHead) Decode(data []byte) (decodedData []byte, needSendBack bool, err error) {
 	if r.rawTransReceived {
-		return data, 0, nil
+		return data, false, nil
 	}
 	r.rawTransReceived = true
-	return data, 0, nil
+	return data, true, nil
 }

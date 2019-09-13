@@ -32,6 +32,9 @@ func NewSSRClient(u *url.URL) (*SSTCPConn, error) {
 	}
 
 	ssconn := NewSSTCPConn(conn, cipher)
+
+
+
 	if ssconn.Conn == nil || ssconn.RemoteAddr() == nil {
 		return nil, errors.New("nil connection")
 	}
@@ -48,6 +51,7 @@ func NewSSRClient(u *url.URL) (*SSTCPConn, error) {
 		Param:  query.Get("obfs-param"),
 	}
 	ssconn.IObfs.SetServerInfo(obfsServerInfo)
+
 	ssconn.IProtocol = protocol.NewProtocol(query.Get("protocol"))
 	protocolServerInfo := &ssr.ServerInfoForObfs{
 		Host:   rs[0],

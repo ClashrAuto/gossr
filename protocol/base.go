@@ -12,14 +12,25 @@ var (
 	creatorMap = make(map[string]creator)
 )
 
+//type IProtocol interface {
+//	SetServerInfo(s *ssr.ServerInfoForObfs)
+//	GetServerInfo() *ssr.ServerInfoForObfs
+//	PreEncrypt(data []byte) ([]byte, error)
+//	PostDecrypt(data []byte) ([]byte, int, error)
+//	SetData(data interface{})
+//	GetData() interface{}
+//}
+
+
 type IProtocol interface {
 	SetServerInfo(s *ssr.ServerInfoForObfs)
 	GetServerInfo() *ssr.ServerInfoForObfs
-	PreEncrypt(data []byte) ([]byte, error)
-	PostDecrypt(data []byte) ([]byte, int, error)
+	PreEncrypt(data []byte) (encryptedData []byte, err error)
+	PostDecrypt(data []byte) (decryptedData []byte, err error)
 	SetData(data interface{})
 	GetData() interface{}
 }
+
 
 type authData struct {
 	clientID     []byte

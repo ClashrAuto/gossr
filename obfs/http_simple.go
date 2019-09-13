@@ -15,6 +15,8 @@ var (
 		"", "",
 		"login.php?redir=", "",
 		"register.php?code=", "",
+		"?keyword=", "",
+		"search?src=typd&q=", "&lang=en",
 		"s?ie=utf-8&f=8&rsv_bp=1&rsv_idx=1&ch=&bar=&wd=", "&rn=",
 		"post.php?id=", "&goto=view.php",
 	}
@@ -162,17 +164,33 @@ func (t *httpSimplePost) Encode(data []byte) (encodedData []byte, err error) {
 	return
 }
 
-func (t *httpSimplePost) Decode(data []byte) ([]byte, uint64, error) {
+//func (t *httpSimplePost) Decode(data []byte) ([]byte, uint64, error) {
+//	if t.rawTransReceived {
+//		return data, 0, nil
+//	}
+//
+//	pos := bytes.Index(data, []byte("\r\n\r\n"))
+//	if pos > 0 {
+//		decodedData := make([]byte, len(data)-pos-4)
+//		copy(decodedData, data[pos+4:])
+//		t.rawTransReceived = true
+//		return decodedData, 0, nil
+//	}
+//	return nil, 0, nil
+//}
+
+
+func (t *httpSimplePost) Decode(data []byte) (decodedData []byte, needSendBack bool, err error) {
 	if t.rawTransReceived {
-		return data, 0, nil
+		return data, false, nil
 	}
 
 	pos := bytes.Index(data, []byte("\r\n\r\n"))
 	if pos > 0 {
-		decodedData := make([]byte, len(data)-pos-4)
+		decodedData = make([]byte, len(data)-pos-4)
 		copy(decodedData, data[pos+4:])
 		t.rawTransReceived = true
-		return decodedData, 0, nil
 	}
-	return nil, 0, nil
+
+	return decodedData, false, nil
 }
