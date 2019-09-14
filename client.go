@@ -23,8 +23,7 @@ func NewSSRClient(u *url.URL) (*SSTCPConn, error) {
 	}
 
 	dialer := net.Dialer{
-		Timeout:   time.Millisecond * 500,
-		DualStack: true,
+		Timeout: time.Millisecond * 500,
 	}
 	conn, err := dialer.Dial("tcp", u.Host)
 	if err != nil {

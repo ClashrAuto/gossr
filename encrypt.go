@@ -13,10 +13,10 @@ import (
 	"github.com/zu1k/gossr/tools"
 	"github.com/zu1k/gossr/tools/leakybuf"
 
-	"gitlab.com/yawning/chacha20.git"
 	"github.com/dgryski/go-camellia"
 	"github.com/dgryski/go-idea"
 	"github.com/dgryski/go-rc2"
+	"gitlab.com/yawning/chacha20.git"
 	"golang.org/x/crypto/blowfish"
 	"golang.org/x/crypto/cast5"
 	"golang.org/x/crypto/salsa20/salsa"
@@ -234,9 +234,6 @@ func NewStreamCipher(method, password string) (c *StreamCipher, err error) {
 
 	c = &StreamCipher{key: key, info: mi}
 
-	if err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 
@@ -244,7 +241,7 @@ func NewStreamCipher(method, password string) (c *StreamCipher, err error) {
 func (c *StreamCipher) initEncrypt() (iv []byte, err error) {
 	if c.iv == nil {
 		iv = make([]byte, c.info.ivLen)
-		rand.Read(iv)
+		_, _ = rand.Read(iv)
 		c.iv = iv
 	} else {
 		iv = c.iv

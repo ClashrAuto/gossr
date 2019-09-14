@@ -121,7 +121,7 @@ func (c *SSTCPConn) doRead(b []byte) (n int, err error) {
 
 		//do send back
 		if length == 1 {
-			c.Write(make([]byte, 0))
+			_, _ = c.Write(make([]byte, 0))
 			return 0, nil
 		}
 
