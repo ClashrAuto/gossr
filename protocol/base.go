@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/zu1k/gossr/ssr"
@@ -9,7 +10,8 @@ import (
 type creator func() IProtocol
 
 var (
-	creatorMap = make(map[string]creator)
+	creatorMap              = make(map[string]creator)
+	NotSupportProtocolError = errors.New("protocol do not support")
 )
 
 type IProtocol interface {
@@ -30,10 +32,10 @@ func register(name string, c creator) {
 	creatorMap[name] = c
 }
 
-func NewProtocol(name string) IProtocol {
+func NewProtocol(name string) (iprotocol IProtocol, err error) {
 	c, ok := creatorMap[strings.ToLower(name)]
 	if ok {
-		return c()
+		return c(), nil
 	}
-	return nil
+	return nil, NotSupportProtocolError
 }

@@ -1,6 +1,7 @@
 package obfs
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/zu1k/gossr/ssr"
@@ -9,7 +10,8 @@ import (
 type creator func() IObfs
 
 var (
-	creatorMap = make(map[string]creator)
+	creatorMap          = make(map[string]creator)
+	NotSupportObfsError = errors.New("obfs method do not support")
 )
 
 type IObfs interface {
@@ -26,10 +28,10 @@ func register(name string, c creator) {
 }
 
 // NewObfs create an obfs object by name and return as an IObfs interface
-func NewObfs(name string) IObfs {
+func NewObfs(name string) (iobfs IObfs, err error) {
 	c, ok := creatorMap[strings.ToLower(name)]
 	if ok {
-		return c()
+		return c(), nil
 	}
-	return nil
+	return nil, NotSupportObfsError
 }
