@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/zu1k/gossr/ssr"
-	"github.com/zu1k/gossr/tools"
+	"github.com/ClashrAuto/gossr/ssr"
+	"github.com/ClashrAuto/gossr/tools"
 )
 
 func init() {

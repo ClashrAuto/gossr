@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/zu1k/gossr"
-	"github.com/zu1k/gossr/tools/leakybuf"
-	"github.com/zu1k/gossr/tools/socks"
+	"github.com/ClashrAuto/gossr"
+	"github.com/ClashrAuto/gossr/tools/leakybuf"
+	"github.com/ClashrAuto/gossr/tools/socks"
 )
 
 var (

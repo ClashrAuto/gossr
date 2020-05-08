@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/zu1k/gossr/ssr"
+	"github.com/ClashrAuto/gossr/ssr"
 )
 
 type creator func() IProtocol
